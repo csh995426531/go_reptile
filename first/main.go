@@ -2,21 +2,28 @@ package main
 
 import (
 	"fmt"
-	"io"
 	"log"
 	"net/http"
+	"os"
 	"strconv"
+	"sync"
 
 	"github.com/PuerkitoBio/goquery"
 )
 
-func hello(w http.ResponseWriter, r *http.Request) {
-
-	io.WriteString(w, "hello ,this is from HelloServer func")
-}
-
 func main() {
-	var urls []string
+	var urls = make(chan string)
+	var wg1 sync.WaitGroup
+	var wg sync.WaitGroup
+	file := "movies.txt"
+	// var infos = [250]string{}
+
+	fl, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE, 0644)
+	if err != nil {
+		return
+	}
+	fl.Write([]byte("start\n"))
+	fl.Close()
 
 	listURL := "https://movie.douban.com/top250?start="
 
@@ -24,27 +31,58 @@ func main() {
 
 		start := i * 25
 		newURL := listURL + strconv.Itoa(start)
+		wg1.Add(1)
+		go func() {
 
-		urls = getLIST(newURL)
+			getLIST(newURL, urls)
 
-		for _, url := range urls {
-			getMOVIE(url)
-		}
+			defer func() {
+				wg1.Done()
+			}()
+		}()
+
 	}
+	wg1.Wait()
+
+	for i := 0; i < 250; i++ {
+		go func() {
+			wg.Add(1)
+			url := <-urls
+
+			info := getMOVIE(url)
+			// append(infos, info)
+			// fmt.Println(info)
+			fl, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE, 0644)
+			if err != nil {
+				return
+			}
+
+			fl.Write([]byte(info))
+			defer func() {
+				wg.Done()
+				if err := recover(); err != nil {
+					// fl.Write([]byte(p))
+					fmt.Println(err)
+				}
+				fl.Close()
+
+			}()
+		}()
+	}
+	wg.Wait()
 }
 
 // getLIST 下载函数
-// url 下载
-// byte : 返回值
-func getLIST(url string) []string {
-	var urls []string
+// url 分页列表链接
+//
+func getLIST(url string, urls chan string) {
 
 	res, err := http.Get(url)
 	if err != nil {
-		fmt.Println(err.Error())
-		return nil
+		panic(err)
 	}
 
+	//函数结束后关闭相关链接
 	defer res.Body.Close()
 
 	// ioutil.ReadAll(res.Body)
@@ -56,18 +94,17 @@ func getLIST(url string) []string {
 	}
 
 	doc.Find("#content .article .grid_view .item .pic a").Each(func(i int, s *goquery.Selection) {
-		// fmt.Printf("%v", s)
+		fmt.Println(urls)
 		movieURL, _ := s.Attr("href")
-		urls = append(urls, movieURL)
+		urls <- movieURL
 	})
-	return urls
 }
 
 // getMOVIE 下载函数
 // url 下载
-// byte : 返回值
-func getMOVIE(url string) {
-	fmt.Println(url)
+// string : 返回值
+func getMOVIE(url string) string {
+
 	res, err := http.Get(url)
 	if err != nil {
 		// return nil
@@ -82,23 +119,30 @@ func getMOVIE(url string) {
 	}
 
 	//三种写法都可以
-	fmt.Println("名称：" + doc.Find(`#content h1`).ChildrenFiltered(`[property="v:itemreviewed"]`).Text())
-	fmt.Println("名称：" + doc.Find(`#content h1 span`).Filter(`[property="v:itemreviewed"]`).Text())
+	// fmt.Println("名称：" + doc.Find(`#content h1`).ChildrenFiltered(`[property="v:itemreviewed"]`).Text())
+	// fmt.Println("名称：" + doc.Find(`#content h1 span`).Filter(`[property="v:itemreviewed"]`).Text())
 
-	doc.Find("#content h1").Each(func(i int, s *goquery.Selection) {
+	// doc.Find("#content h1").Each(func(i int, s *goquery.Selection) {
 
-		name := s.ChildrenFiltered(`[property="v:itemreviewed"]`).Text()
-		fmt.Println("名称：" + name)
-	})
+	// 	name := s.ChildrenFiltered(`[property="v:itemreviewed"]`).Text()
+	// 	fmt.Println("名称：" + name)
+	// })
+	str := "名称：" + doc.Find(`#content h1 span`).Filter(`[property="v:itemreviewed"]`).Text() + "\n"
 
-	fmt.Println("年份：" + doc.Find("#content h1 .year").Eq(1).Text())
+	str += "年份：" + doc.Find("#content .year").Text() + "\n"
 
-	fmt.Println("导演：" + doc.Find("#info .attrs a").Eq(1).Text())
+	str += "导演：" + doc.Find("#info .attrs a").Eq(0).Text() + "\n"
 
-	//这里不太懂
 	pl := ""
-	doc.Find("#info span:nth-child(3) span.attrs").Each(func(i int, s *goquery.Selection) {
+	doc.Find("#info .attrs").Eq(1).Each(func(i int, s *goquery.Selection) {
 		pl += s.Text()
 	})
-	fmt.Println("编剧:" + pl)
+	str += "编剧:" + pl + "\n"
+
+	zy := ""
+	doc.Find("#info .attrs").Eq(2).Each(func(i int, s *goquery.Selection) {
+		zy += s.Text()
+	})
+	str += "主演:" + zy + "\n"
+	return str
 }
