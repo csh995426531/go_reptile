@@ -13,36 +13,32 @@ import (
 
 func main() {
 	var urls = make(chan string)
-	var wg1 sync.WaitGroup
+	var wg2 sync.WaitGroup
 	var wg sync.WaitGroup
-	file := "movies.txt"
-	// var infos = [250]string{}
 
-	fl, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE, 0644)
-	if err != nil {
-		return
-	}
-	fl.Write([]byte("start\n"))
-	fl.Close()
+	fileName := "movies.txt"
 
 	listURL := "https://movie.douban.com/top250?start="
 
 	for i := 0; i < 10; i++ {
-
+		wg2.Add(1)
 		start := i * 25
 		newURL := listURL + strconv.Itoa(start)
-		wg1.Add(1)
+
 		go func() {
 
 			getLIST(newURL, urls)
-
 			defer func() {
-				wg1.Done()
+				wg2.Done()
 			}()
 		}()
-
 	}
-	wg1.Wait()
+
+	fileObject, err := os.OpenFile(fileName, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0644)
+	if err != nil {
+		fmt.Println(err.Error())
+		os.Exit(1)
+	}
 
 	for i := 0; i < 250; i++ {
 		go func() {
@@ -51,25 +47,25 @@ func main() {
 
 			info := getMOVIE(url)
 			// append(infos, info)
-			// fmt.Println(info)
-			fl, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE, 0644)
-			if err != nil {
-				return
-			}
 
-			fl.Write([]byte(info))
+			fileObject.Write([]byte(info))
+
 			defer func() {
 				wg.Done()
 				if err := recover(); err != nil {
-					// fl.Write([]byte(p))
+
 					fmt.Println(err)
 				}
-				fl.Close()
 
 			}()
 		}()
 	}
 	wg.Wait()
+	wg2.Wait()
+
+	fileObject.Close()
+
+	fmt.Println("完成")
 }
 
 // getLIST 下载函数
@@ -94,8 +90,9 @@ func getLIST(url string, urls chan string) {
 	}
 
 	doc.Find("#content .article .grid_view .item .pic a").Each(func(i int, s *goquery.Selection) {
-		fmt.Println(urls)
+
 		movieURL, _ := s.Attr("href")
+
 		urls <- movieURL
 	})
 }
@@ -110,6 +107,7 @@ func getMOVIE(url string) string {
 		// return nil
 		panic(err)
 	}
+	fmt.Println(url)
 
 	defer res.Body.Close()
 
